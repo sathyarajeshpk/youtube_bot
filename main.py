@@ -46,8 +46,36 @@ TEMP_DIR   = Path("temp")
 VOICE_ENGLISH = "en-IN-PrabhatNeural"    # Indian English male — warm and clear
 VOICE_TAMIL   = "ta-IN-ValluvarNeural"   # Tamil male — natural Tamil accent
 
-# Font
-FONT_BOLD = "C:/Windows/Fonts/arialbd.ttf" if platform.system() == "Windows" else "DejaVu-Sans-Bold"
+# Font — full path required for MoviePy 2.x on all platforms
+def find_font() -> str:
+    if platform.system() == "Windows":
+        return "C:/Windows/Fonts/arialbd.ttf"
+    # Linux (GitHub Actions) — search common font locations
+    candidates = [
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+        "/usr/share/fonts/dejavu/DejaVuSans-Bold.ttf",
+        "/usr/share/fonts/truetype/DejaVuSans-Bold.ttf",
+        "/usr/share/fonts/TTF/DejaVuSans-Bold.ttf",
+    ]
+    for path in candidates:
+        if os.path.exists(path):
+            return path
+    # Last resort: find it dynamically
+    import subprocess
+    try:
+        result = subprocess.run(
+            ["find", "/usr/share/fonts", "-name", "DejaVuSans-Bold.ttf"],
+            capture_output=True, text=True, timeout=10
+        )
+        found = result.stdout.strip().split("\n")[0]
+        if found and os.path.exists(found):
+            return found
+    except Exception:
+        pass
+    return "DejaVuSans-Bold"   # Final fallback
+
+FONT_BOLD = find_font()
+print(f"  Font: {FONT_BOLD}")
 
 # ════════════════════════════════════════════════════════
 # FUNNY TOPIC BANK
@@ -98,51 +126,65 @@ def call_groq(client: Groq, prompt: str, max_tokens: int = 2000) -> str:
 def generate_english_script(topic: str, client: Groq) -> dict:
     """
     Generate a genuinely funny English script.
-    Prompt is engineered for maximum comedy — specific, punchy, Indian-relatable.
+    Uses real viral Indian comedy examples as reference so the AI learns the exact tone.
     """
-    prompt = f"""You are India's funniest YouTube scriptwriter. Your videos go viral because they are SPECIFIC, SURPRISING, and make people laugh out loud.
+    prompt = f"""You are the head writer for India's most viral comedy YouTube channel — think BB Ki Vines meets Tanmay Bhat meets a facts channel.
 
-Topic: {topic}
+Your videos get 10 million views because every single line is either surprising, relatable, or laugh-out-loud funny. Usually all three.
 
-Write a 6-scene comedy video script. Each scene must follow this formula:
-1. State a specific shocking/weird fact
-2. Add a funny comparison or reaction that an Indian person would instantly relate to
-3. End with a punchline or unexpected twist
+TODAY'S TOPIC: {topic}
 
-COMEDY RULES — follow all of them:
-- NEVER be vague. "A fish in Kerala" beats "a fish somewhere"
-- Compare weird facts to everyday Indian life: traffic, chai, cricket, UPSC, relatives, weddings, electricity cuts
-- Use the comedian's trick of building up then subverting expectations
-- Include at least one fact so bizarre the viewer will want to share it
-- Speak directly to the viewer like "You" and "We Indians"
-- One scene must have a self-aware joke about the video itself
+---
+STUDY THESE REAL EXAMPLES OF VIRAL INDIAN COMEDY NARRATION:
 
-EXAMPLE of BAD narration (boring, vague):
-"Some animals have strange abilities. Scientists have studied them."
+Example 1 (animal facts style):
+"The pistol shrimp stuns its prey by snapping its claw so fast it creates a flash of light hotter than the surface of the sun. Meanwhile, we can't even snap our fingers in rhythm at a wedding."
 
-EXAMPLE of GOOD narration (funny, specific):
-"A mantis shrimp can punch with the force of a bullet. Scientists measured it at 1500 newtons. For context, your uncle arguing about cricket uses maybe 2."
+Example 2 (weird laws style):
+"In Rajasthan, there's a law that says you cannot fly a kite without a police permit. The British made this law in 1923 to stop independence fighters from signalling each other. We kept the law. We kept the kite festival. Nobody got the memo."
+
+Example 3 (world records style):
+"A man in Tamil Nadu grew his mustache for 32 years. It is now 4.29 meters long. His wife said and I quote — 'it was either me or the mustache.' The mustache won. Respect."
+
+Example 4 (Indian culture style):
+"Indian Railways serves 13 million passengers every single day. That is more than the entire population of Portugal. And somehow the chai still costs 7 rupees and tastes like it was made by someone who personally hates you."
+
+Example 5 (self-aware style):
+"Scientists in Japan trained a fish to recognize human faces. It got 86% accuracy. Your relatives at a wedding cannot recognize you after 2 years, but sure, the fish is the impressive one."
+
+---
+NOW WRITE 6 SCENES in EXACTLY this style. Each scene MUST have:
+1. A SPECIFIC surprising fact with actual numbers, names, or places
+2. An Indian comparison that makes the viewer think "oh my god that's so true"
+3. A punchline that lands — either a twist, a callback, or a burn
+
+STRICT RULES:
+- NEVER say "some", "many", "often", "usually" — always use SPECIFIC numbers and places
+- NEVER be inspirational or educational-sounding — this is COMEDY
+- At least 2 scenes must reference something from daily Indian life (chai, traffic, relatives, CBSE, cricket, arranged marriage, electricity cuts, jugaad, WhatsApp forwards)
+- One scene must end with a completely unexpected twist
+- One scene must roast the viewer lovingly ("We Indians...", "Your mom...", "Your uncle...")
+- Speak fast and punchy — like a stand-up comedian, not a documentary narrator
 
 Return ONLY this JSON with no markdown, no explanation:
 {{
-  "title": "A title so good someone would send it to their family WhatsApp group — under 65 chars, include a number or question",
-  "description": "2 sentences that make someone curious enough to click. Funny tone.\\n\\n#funny #comedy #india #facts #trending #viral #humor #shorts #lol #desi",
+  "title": "Title that someone will SHARE on their family WhatsApp group — include a number or shocking word, under 65 chars",
+  "description": "2 sentences. First sentence: shocking hook. Second sentence: why they must watch.\\n\\n#funny #comedy #india #facts #trending #viral #humor #shorts #lol #desi",
   "tags": ["funny","comedy","india","facts","trending","viral","humor","shorts","lol","desi"],
   "scenes": [
     {{
-      "narration": "Scene narration — specific fact + Indian comparison + punchline. 2 sentences MAX.",
-      "search_query": "2-3 word English stock footage search term that visually matches the scene",
+      "narration": "Specific fact + Indian comparison + punchline. EXACTLY 2 sentences. No more.",
+      "search_query": "2-3 word English footage term matching the visual (e.g. 'shrimp underwater', 'man with mustache', 'train crowd india')",
       "duration": 5
     }}
   ]
 }}
 
-Rules:
 - Exactly 6 scenes
-- Each narration: 2 sentences MAXIMUM — punchy and fast
-- search_query: plain English only, simple visual terms (e.g. 'confused man', 'monkey stealing food', 'crowded train')
-- duration: integer between 4 and 7
-- Output ONLY raw JSON"""
+- Each narration: EXACTLY 2 sentences — punchy, fast, funny
+- search_query: plain English only, simple visual terms
+- duration: integer 4 to 7
+- Output ONLY raw JSON, nothing else"""
 
     raw    = call_groq(client, prompt)
     script = json.loads(clean_json(raw))
@@ -150,17 +192,31 @@ Rules:
 
 
 def translate_to_tamil(text: str, client: Groq) -> str:
-    """Translate English to Tamil. Plain string — never inside JSON."""
+    """
+    Translate English comedy to Tamil.
+    Prompt includes Tamil comedy examples so the tone stays funny, not textbook.
+    """
     prompt = (
-        "You are a Tamil comedian and translator. "
-        "Translate the following to Tamil. "
-        "Keep the humor, punchline, and energy EXACTLY. "
-        "Use natural spoken Tamil that a Tamil YouTube viewer would enjoy — not formal written Tamil. "
-        "Return ONLY the Tamil translation, no explanation, no English:\n\n"
+        "You are a Tamil comedy writer and translator for YouTube. "
+        "Your Tamil videos go viral because they sound like a real Chennai comedian talking — "
+        "not like a textbook or a news anchor.\n\n"
+        "STUDY THESE EXAMPLES of good Tamil comedy translation style:\n"
+        "English: 'A mantis shrimp punches at 1500 newtons. Your uncle arguing about cricket uses maybe 2.'\n"
+        "Tamil style: 'ஒரு மேன்டிஸ் இறால் 1500 நியூட்டன் சக்தியோடு குத்தும். உங்க மாமா கிரிக்கெட்டை பத்தி வாதாடும்போது ஒரு 2 நியூட்டன் இருக்கா இல்லையான்னே தெரியல.'\n\n"
+        "English: 'Indian Railways serves 13 million people daily. The chai still tastes like someone personally hates you.'\n"
+        "Tamil style: 'இந்திய ரெயில்வே ஒரே நாளில் 1.3 கோடி பேருக்கு சேவை செய்யுது. ஆனா டீ மட்டும் இன்னும் உங்களை யாரோ வெறுக்கிறாங்க மாதிரி taste ஆகுது.'\n\n"
+        "RULES for your translation:\n"
+        "- Use natural spoken Tamil, NOT formal written Tamil\n"
+        "- Keep all numbers, place names, and facts EXACTLY as they are\n"
+        "- Keep the PUNCHLINE — if the English is funny, the Tamil must also be funny\n"
+        "- Use Tamil slang where it fits (மச்சான், கில்லி, etc.)\n"
+        "- Do NOT translate English words that are commonly used in Tamil speech (like 'scientist', 'record', 'percent')\n"
+        "- Return ONLY the Tamil text, no explanation, no English\n\n"
+        "Now translate this:\n\n"
         + text
     )
-    result = call_groq(client, prompt, max_tokens=400)
-    result = re.sub(r"^(Here is|Translation:|Tamil:|Sure,)\s*", "", result, flags=re.IGNORECASE)
+    result = call_groq(client, prompt, max_tokens=500)
+    result = re.sub(r"^(Here is|Translation:|Tamil:|Sure,|இதோ)\s*", "", result, flags=re.IGNORECASE)
     return result.strip()
 
 
@@ -180,10 +236,15 @@ def generate_script(language: str) -> dict:
 
     if language == "Tamil":
         print("   Translating to Tamil (scene by scene)...")
-        script["title"] = translate_to_tamil(script["title"], client)
+
+        # Translate title with fallback to English if translation returns empty
+        tamil_title = translate_to_tamil(script["title"], client)
+        script["title"] = tamil_title if tamil_title and len(tamil_title.strip()) > 3 else script["title"]
+
         eng_desc = script["description"].split("\n")[0]
+        tamil_desc = translate_to_tamil(eng_desc, client)
         script["description"] = (
-            translate_to_tamil(eng_desc, client)
+            (tamil_desc if tamil_desc and len(tamil_desc.strip()) > 3 else eng_desc)
             + "\n\n#funny #tamil #comedy #tamilcomedy #trending #viral #tamilfacts #shorts #சிரிப்பு #கலாட்டா"
         )
         script["tags"] = [
@@ -191,7 +252,11 @@ def generate_script(language: str) -> dict:
             "viral", "tamilfacts", "shorts", "desi", "india",
         ]
         for i, scene in enumerate(script.get("scenes", [])):
-            scene["narration"] = translate_to_tamil(scene["narration"], client)
+            tamil_narration = translate_to_tamil(scene["narration"], client)
+            scene["narration"] = (
+                tamil_narration if tamil_narration and len(tamil_narration.strip()) > 3
+                else scene["narration"]
+            )
             print(f"    Translated scene {i+1}/6")
 
     print(f"   Title: {script['title']}")
@@ -377,6 +442,7 @@ def upload_to_youtube(video_path: str, title: str, description: str, tags: list)
 # ════════════════════════════════════════════════════════
 
 def run_pipeline(language: str, output_path: str):
+    import time
     print(f"\n{'─'*55}")
     print(f"  Starting {language} video...")
     print(f"{'─'*55}\n")
@@ -386,14 +452,22 @@ def run_pipeline(language: str, output_path: str):
         video_id = upload_to_youtube(
             output_path, script["title"], script["description"], script["tags"]
         )
+        time.sleep(1)   # Small delay so MoviePy fully releases the file
         if os.path.exists(output_path):
-            os.remove(output_path)
+            try:
+                os.remove(output_path)
+            except Exception:
+                pass    # Non-critical — file cleanup can fail silently
         print(f"  {language} done: https://youtube.com/watch?v={video_id}\n")
         return video_id
     except Exception as e:
         print(f"  {language} failed: {e}")
+        time.sleep(1)
         if os.path.exists(output_path):
-            os.remove(output_path)
+            try:
+                os.remove(output_path)
+            except Exception:
+                pass
         return None
 
 

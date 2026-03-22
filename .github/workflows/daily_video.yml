@@ -9,7 +9,7 @@ jobs:
   generate-and-upload:
     name: Generate & Upload Tamil + English Videos
     runs-on: ubuntu-latest
-    timeout-minutes: 60      # 2 videos — allow more time
+    timeout-minutes: 60
 
     steps:
       - name: 📥 Checkout repository
@@ -24,7 +24,16 @@ jobs:
       - name: 🎞️ Install system dependencies
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y ffmpeg fonts-dejavu-core
+          sudo apt-get install -y \
+            ffmpeg \
+            fonts-dejavu \
+            fonts-dejavu-core \
+            fonts-dejavu-extra \
+            fontconfig
+          fc-cache -fv
+
+      - name: 🔍 Verify font installed
+        run: find /usr/share/fonts -name "DejaVuSans-Bold.ttf" | head -5
 
       - name: 📦 Install Python packages
         run: pip install -r requirements.txt
