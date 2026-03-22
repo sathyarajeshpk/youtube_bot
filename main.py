@@ -186,8 +186,35 @@ Return ONLY this JSON with no markdown, no explanation:
 - duration: integer 4 to 7
 - Output ONLY raw JSON, nothing else"""
 
-    raw    = call_groq(client, prompt)
-    script = json.loads(clean_json(raw))
+    # Try up to 3 times — Groq occasionally produces malformed JSON
+    for attempt in range(3):
+        try:
+            raw    = call_groq(client, prompt)
+            script = json.loads(clean_json(raw))
+            return script
+        except json.JSONDecodeError as e:
+            print(f"    JSON parse failed (attempt {attempt+1}/3): {e}")
+            if attempt == 2:
+                # Final attempt: use a much simpler prompt that always gives clean JSON
+                simple_prompt = (
+                    f"Write a funny 6-scene Indian comedy YouTube script about: {topic}\n\n"
+                    "Each scene: specific funny fact + Indian relatable comparison + punchline.\n"
+                    "Return ONLY this JSON:\n"
+                    '{"title": "funny title under 65 chars",'
+                    '"description": "2 funny sentences\n\n#funny #comedy #india #viral",'
+                    '"tags": ["funny","comedy","india","viral","shorts"],'
+                    '"scenes": ['
+                    '{"narration": "specific fact. funny Indian punchline.", "search_query": "2 word footage term", "duration": 5},'
+                    '{"narration": "specific fact. funny Indian punchline.", "search_query": "2 word footage term", "duration": 5},'
+                    '{"narration": "specific fact. funny Indian punchline.", "search_query": "2 word footage term", "duration": 5},'
+                    '{"narration": "specific fact. funny Indian punchline.", "search_query": "2 word footage term", "duration": 5},'
+                    '{"narration": "specific fact. funny Indian punchline.", "search_query": "2 word footage term", "duration": 5},'
+                    '{"narration": "specific fact. funny Indian punchline.", "search_query": "2 word footage term", "duration": 5}'
+                    "]}"
+                )
+                raw    = call_groq(client, simple_prompt)
+                script = json.loads(clean_json(raw))
+                return script
     return script
 
 
