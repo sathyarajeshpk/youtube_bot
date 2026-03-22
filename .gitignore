@@ -1,0 +1,14 @@
+# ── Secret files — NEVER upload these to GitHub ──────────
+client_secret.json
+youtube_token.json
+
+# ── Generated during video production ────────────────────
+*.mp4
+*.aac
+temp/
+
+# ── Python ────────────────────────────────────────────────
+__pycache__/
+*.pyc
+.env
+bot.log

@@ -1,0 +1,16 @@
+# YouTube Bot — Python Dependencies
+# Rs.0/month — No billing account needed
+# Install with: pip install -r requirements.txt
+
+groq>=0.9.0                        # Groq AI — script generation (FREE)
+edge-tts>=6.1.9                    # Microsoft Neural TTS — human-sounding voice (FREE)
+google-auth>=2.28.0                # Google authentication
+google-auth-oauthlib>=1.2.0        # OAuth flow for YouTube
+google-auth-httplib2>=0.2.0        # HTTP transport
+google-api-python-client>=2.120.0  # YouTube Data API v3
+moviepy>=2.0.0                     # Video assembly with animations
+requests>=2.31.0                   # HTTP requests (Pexels API)
+Pillow>=10.2.0                     # Image processing
+numpy>=1.26.0                      # Array math
+imageio>=2.34.0                    # Video I/O
+imageio-ffmpeg>=0.4.9              # FFmpeg backend
