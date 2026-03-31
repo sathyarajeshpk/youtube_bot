@@ -2,7 +2,7 @@
 Daily AI YouTube Video Bot
 Posts 2 videos per day: English + Tamil
 Neural voice (Microsoft Edge TTS) + Animated captions
-Much funnier prompts with stand-up comedy style
+Funny Indian comedy style
 100% Free - No billing account needed
 """
 
@@ -22,12 +22,14 @@ from datetime import datetime
 warnings.filterwarnings("ignore")
 
 from groq import Groq
-import edge_tts                     # Microsoft neural TTS — sounds like a real human
+import edge_tts  # Microsoft neural TTS — sounds like a real human
+
 from moviepy import (
     VideoFileClip, AudioFileClip, ColorClip,
     TextClip, CompositeVideoClip, concatenate_videoclips,
 )
 import moviepy.video.fx as vfx
+
 from google.oauth2.credentials import Credentials
 from google.auth.transport.requests import Request
 from googleapiclient.discovery import build
@@ -36,21 +38,24 @@ from googleapiclient.http import MediaFileUpload
 # ════════════════════════════════════════════════════════
 # CONFIG
 # ════════════════════════════════════════════════════════
-VIDEO_W    = 1280
-VIDEO_H    = 720
+
+VIDEO_W = 1280
+VIDEO_H = 720
 VIDEO_SIZE = (VIDEO_W, VIDEO_H)
-FPS        = 24
-TEMP_DIR   = Path("temp")
+FPS = 24
+TEMP_DIR = Path("temp")
 
 # Microsoft Edge TTS voices — natural, human-sounding, free
-VOICE_ENGLISH = "en-IN-PrabhatNeural"    # Indian English male — warm and clear
-VOICE_TAMIL   = "ta-IN-ValluvarNeural"   # Tamil male — natural Tamil accent
+VOICE_ENGLISH = "en-IN-PrabhatNeural"   # Indian English male — warm and clear
+VOICE_TAMIL   = "ta-IN-ValluvarNeural"  # Tamil male — natural Tamil accent
+
+# Groq model — updated from deprecated llama-3.1-8b-instant
+GROQ_MODEL = "llama3-8b-8192"
 
 # Font — full path required for MoviePy 2.x on all platforms
 def find_font() -> str:
     if platform.system() == "Windows":
         return "C:/Windows/Fonts/arialbd.ttf"
-    # Linux (GitHub Actions) — search common font locations
     candidates = [
         "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
         "/usr/share/fonts/dejavu/DejaVuSans-Bold.ttf",
@@ -60,7 +65,6 @@ def find_font() -> str:
     for path in candidates:
         if os.path.exists(path):
             return path
-    # Last resort: find it dynamically
     import subprocess
     try:
         result = subprocess.run(
@@ -72,14 +76,15 @@ def find_font() -> str:
             return found
     except Exception:
         pass
-    return "DejaVuSans-Bold"   # Final fallback
+    return "DejaVuSans-Bold"
 
 FONT_BOLD = find_font()
-print(f"  Font: {FONT_BOLD}")
+print(f"✅ Font: {FONT_BOLD}")
 
 # ════════════════════════════════════════════════════════
-# FUNNY TOPIC BANK
+# FUNNY TOPIC BANK — expanded and sharper
 # ════════════════════════════════════════════════════════
+
 FUNNY_TOPICS = [
     "animals doing hilariously dumb things that scientists wasted money studying",
     "bizarre Indian laws that are still active and nobody told us",
@@ -99,11 +104,16 @@ FUNNY_TOPICS = [
     "Indian school exam culture that would confuse the entire western world",
     "street food in India that looks dangerous but is completely addictive",
     "things only Indians do in foreign countries that embarrass everyone",
+    "Indian office culture habits that baffle foreign colleagues",
+    "bizarre government schemes in India that actually existed",
+    "things Indian aunties say at weddings that are legally considered weapons",
+    "how Indians react to cold weather vs the rest of the world",
+    "inventions that Indians accidentally created while trying to fix something else",
+    "things Indian students do before exams that make zero scientific sense",
 ]
 
-
 # ════════════════════════════════════════════════════════
-# STEP 1: SCRIPT GENERATION — MUCH FUNNIER PROMPTS
+# STEP 1: SCRIPT GENERATION
 # ════════════════════════════════════════════════════════
 
 def clean_json(raw: str) -> str:
@@ -115,7 +125,7 @@ def clean_json(raw: str) -> str:
 
 def call_groq(client: Groq, prompt: str, max_tokens: int = 2000) -> str:
     response = client.chat.completions.create(
-        model="llama-3.1-8b-instant",
+        model=GROQ_MODEL,
         messages=[{"role": "user", "content": prompt}],
         temperature=1.1,
         max_tokens=max_tokens,
@@ -124,10 +134,6 @@ def call_groq(client: Groq, prompt: str, max_tokens: int = 2000) -> str:
 
 
 def generate_english_script(topic: str, client: Groq) -> dict:
-    """
-    Generate a genuinely funny English script.
-    Uses real viral Indian comedy examples as reference so the AI learns the exact tone.
-    """
     prompt = f"""You are the head writer for India's most viral comedy YouTube channel — think BB Ki Vines meets Tanmay Bhat meets a facts channel.
 
 Your videos get 10 million views because every single line is either surprising, relatable, or laugh-out-loud funny. Usually all three.
@@ -135,24 +141,26 @@ Your videos get 10 million views because every single line is either surprising,
 TODAY'S TOPIC: {topic}
 
 ---
+
 STUDY THESE REAL EXAMPLES OF VIRAL INDIAN COMEDY NARRATION:
 
-Example 1 (animal facts style):
+Example 1:
 "The pistol shrimp stuns its prey by snapping its claw so fast it creates a flash of light hotter than the surface of the sun. Meanwhile, we can't even snap our fingers in rhythm at a wedding."
 
-Example 2 (weird laws style):
+Example 2:
 "In Rajasthan, there's a law that says you cannot fly a kite without a police permit. The British made this law in 1923 to stop independence fighters from signalling each other. We kept the law. We kept the kite festival. Nobody got the memo."
 
-Example 3 (world records style):
-"A man in Tamil Nadu grew his mustache for 32 years. It is now 4.29 meters long. His wife said and I quote — 'it was either me or the mustache.' The mustache won. Respect."
+Example 3:
+"A man in Tamil Nadu grew his mustache for 32 years. It is now 4.29 meters long. His wife said — 'it was either me or the mustache.' The mustache won. Respect."
 
-Example 4 (Indian culture style):
+Example 4:
 "Indian Railways serves 13 million passengers every single day. That is more than the entire population of Portugal. And somehow the chai still costs 7 rupees and tastes like it was made by someone who personally hates you."
 
-Example 5 (self-aware style):
+Example 5:
 "Scientists in Japan trained a fish to recognize human faces. It got 86% accuracy. Your relatives at a wedding cannot recognize you after 2 years, but sure, the fish is the impressive one."
 
 ---
+
 NOW WRITE 6 SCENES in EXACTLY this style. Each scene MUST have:
 1. A SPECIFIC surprising fact with actual numbers, names, or places
 2. An Indian comparison that makes the viewer think "oh my god that's so true"
@@ -167,6 +175,7 @@ STRICT RULES:
 - Speak fast and punchy — like a stand-up comedian, not a documentary narrator
 
 Return ONLY this JSON with no markdown, no explanation:
+
 {{
   "title": "Title that someone will SHARE on their family WhatsApp group — include a number or shocking word, under 65 chars",
   "description": "2 sentences. First sentence: shocking hook. Second sentence: why they must watch.\\n\\n#funny #comedy #india #facts #trending #viral #humor #shorts #lol #desi",
@@ -186,22 +195,20 @@ Return ONLY this JSON with no markdown, no explanation:
 - duration: integer 4 to 7
 - Output ONLY raw JSON, nothing else"""
 
-    # Try up to 3 times — Groq occasionally produces malformed JSON
     for attempt in range(3):
         try:
-            raw    = call_groq(client, prompt)
+            raw = call_groq(client, prompt)
             script = json.loads(clean_json(raw))
             return script
         except json.JSONDecodeError as e:
-            print(f"    JSON parse failed (attempt {attempt+1}/3): {e}")
+            print(f"⚠️  JSON parse failed (attempt {attempt+1}/3): {e}")
             if attempt == 2:
-                # Final attempt: use a much simpler prompt that always gives clean JSON
                 simple_prompt = (
                     f"Write a funny 6-scene Indian comedy YouTube script about: {topic}\n\n"
                     "Each scene: specific funny fact + Indian relatable comparison + punchline.\n"
                     "Return ONLY this JSON:\n"
                     '{"title": "funny title under 65 chars",'
-                    '"description": "2 funny sentences\n\n#funny #comedy #india #viral",'
+                    '"description": "2 funny sentences\\n\\n#funny #comedy #india #viral",'
                     '"tags": ["funny","comedy","india","viral","shorts"],'
                     '"scenes": ['
                     '{"narration": "specific fact. funny Indian punchline.", "search_query": "2 word footage term", "duration": 5},'
@@ -212,32 +219,23 @@ Return ONLY this JSON with no markdown, no explanation:
                     '{"narration": "specific fact. funny Indian punchline.", "search_query": "2 word footage term", "duration": 5}'
                     "]}"
                 )
-                raw    = call_groq(client, simple_prompt)
+                raw = call_groq(client, simple_prompt)
                 script = json.loads(clean_json(raw))
                 return script
     return script
 
 
 def translate_to_tamil(text: str, client: Groq) -> str:
-    """
-    Translate English comedy to Tamil.
-    Prompt includes Tamil comedy examples so the tone stays funny, not textbook.
-    """
     prompt = (
         "You are a Tamil comedy writer and translator for YouTube. "
         "Your Tamil videos go viral because they sound like a real Chennai comedian talking — "
         "not like a textbook or a news anchor.\n\n"
-        "STUDY THESE EXAMPLES of good Tamil comedy translation style:\n"
-        "English: 'A mantis shrimp punches at 1500 newtons. Your uncle arguing about cricket uses maybe 2.'\n"
-        "Tamil style: 'ஒரு மேன்டிஸ் இறால் 1500 நியூட்டன் சக்தியோடு குத்தும். உங்க மாமா கிரிக்கெட்டை பத்தி வாதாடும்போது ஒரு 2 நியூட்டன் இருக்கா இல்லையான்னே தெரியல.'\n\n"
-        "English: 'Indian Railways serves 13 million people daily. The chai still tastes like someone personally hates you.'\n"
-        "Tamil style: 'இந்திய ரெயில்வே ஒரே நாளில் 1.3 கோடி பேருக்கு சேவை செய்யுது. ஆனா டீ மட்டும் இன்னும் உங்களை யாரோ வெறுக்கிறாங்க மாதிரி taste ஆகுது.'\n\n"
         "RULES for your translation:\n"
         "- Use natural spoken Tamil, NOT formal written Tamil\n"
         "- Keep all numbers, place names, and facts EXACTLY as they are\n"
         "- Keep the PUNCHLINE — if the English is funny, the Tamil must also be funny\n"
         "- Use Tamil slang where it fits (மச்சான், கில்லி, etc.)\n"
-        "- Do NOT translate English words that are commonly used in Tamil speech (like 'scientist', 'record', 'percent')\n"
+        "- Do NOT translate English words commonly used in Tamil speech (like 'scientist', 'record', 'percent')\n"
         "- Return ONLY the Tamil text, no explanation, no English\n\n"
         "Now translate this:\n\n"
         + text
@@ -248,23 +246,14 @@ def translate_to_tamil(text: str, client: Groq) -> str:
 
 
 def generate_script(language: str) -> dict:
-    """
-    Generate script for the given language.
-    Tamil: generate in English first, then translate each field separately.
-    This completely avoids Tamil unicode inside JSON — no parse errors ever.
-    """
-    print(f"   Generating {language} script with Groq...")
-
+    print(f"📝 Generating {language} script with Groq...")
     client = Groq(api_key=os.environ["GROQ_API_KEY"])
-    topic  = random.choice(FUNNY_TOPICS)
+    topic = random.choice(FUNNY_TOPICS)
 
-    # Always generate clean English JSON first
     script = generate_english_script(topic, client)
 
     if language == "Tamil":
-        print("   Translating to Tamil (scene by scene)...")
-
-        # Translate title with fallback to English if translation returns empty
+        print("🔄 Translating to Tamil (scene by scene)...")
         tamil_title = translate_to_tamil(script["title"], client)
         script["title"] = tamil_title if tamil_title and len(tamil_title.strip()) > 3 else script["title"]
 
@@ -284,34 +273,28 @@ def generate_script(language: str) -> dict:
                 tamil_narration if tamil_narration and len(tamil_narration.strip()) > 3
                 else scene["narration"]
             )
-            print(f"    Translated scene {i+1}/6")
+            print(f"   Translated scene {i+1}/6")
 
-    print(f"   Title: {script['title']}")
+    print(f"✅ Title: {script['title']}")
     return script
 
 
 # ════════════════════════════════════════════════════════
 # STEP 2: NEURAL VOICEOVER WITH EDGE TTS
+# FIX: Use asyncio.run() instead of get_event_loop().run_until_complete()
+#      asyncio.run() always creates a fresh event loop — no RuntimeError on
+#      Python 3.10+ GitHub Actions runners.
 # ════════════════════════════════════════════════════════
 
 async def _generate_voiceover_async(text: str, output_path: Path, voice: str) -> None:
-    """Async Edge TTS call — Microsoft neural voice, sounds like a real human."""
     communicate = edge_tts.Communicate(text=text, voice=voice, rate="+10%")
     await communicate.save(str(output_path))
 
 
 def generate_voiceover(text: str, output_path: Path, language: str) -> None:
-    """
-    Generate neural voiceover using Microsoft Edge TTS.
-    Completely free, no API key, sounds natural and human.
-    English: Indian English male voice (en-IN-PrabhatNeural)
-    Tamil: Tamil male voice (ta-IN-ValluvarNeural)
-    """
     voice = VOICE_TAMIL if language == "Tamil" else VOICE_ENGLISH
-    # Run async function in sync context
-    asyncio.get_event_loop().run_until_complete(
-        _generate_voiceover_async(text, output_path, voice)
-    )
+    # FIX: asyncio.run() is safe on all Python 3.7+ including GitHub Actions
+    asyncio.run(_generate_voiceover_async(text, output_path, voice))
 
 
 # ════════════════════════════════════════════════════════
@@ -331,10 +314,10 @@ def download_stock_video(query: str, min_duration: int, output_path: Path) -> bo
     try:
         data = requests.get(url, headers=headers, timeout=20).json()
         if not data.get("videos"):
-            print(f"    No footage for '{query}' — colour fallback")
+            print(f"   ⚠️  No footage for '{query}' — colour fallback")
             return False
-        video  = random.choice(data["videos"][:5])
-        files  = sorted(video["video_files"], key=lambda x: x.get("width", 0))
+        video = random.choice(data["videos"][:5])
+        files = sorted(video["video_files"], key=lambda x: x.get("width", 0))
         chosen = files[min(len(files) - 1, len(files) // 2)]
         r = requests.get(chosen["link"], stream=True, timeout=90)
         with open(output_path, "wb") as f:
@@ -342,34 +325,40 @@ def download_stock_video(query: str, min_duration: int, output_path: Path) -> bo
                 f.write(chunk)
         return True
     except Exception as e:
-        print(f"    Pexels error for '{query}': {e}")
+        print(f"   ⚠️  Pexels error for '{query}': {e}")
         return False
 
 
 # ════════════════════════════════════════════════════════
-# STEP 4: VIDEO ASSEMBLY WITH ANIMATIONS
+# STEP 4: VIDEO ASSEMBLY
+# FIX: vfx.FadeIn/FadeOut API changed in moviepy 2.x — wrap in try/except
+#      and fall back to clip without effects if the API is unavailable.
 # ════════════════════════════════════════════════════════
 
+def safe_with_effects(clip, effects: list):
+    """Apply effects safely — falls back gracefully if moviepy version differs."""
+    try:
+        return clip.with_effects(effects)
+    except Exception:
+        return clip
+
+
 def make_caption(text: str, duration: float):
-    return (
-        TextClip(
-            text=text, font_size=44, color="white",
-            stroke_color="black", stroke_width=2,
-            size=(VIDEO_W - 120, None), method="caption",
-            text_align="center", font=FONT_BOLD,
-        )
-        .with_position(("center", VIDEO_H - 200))
-        .with_duration(duration)
-        .with_effects([vfx.FadeIn(0.4), vfx.FadeOut(0.4)])
-    )
+    clip = TextClip(
+        text=text, font_size=44, color="white",
+        stroke_color="black", stroke_width=2,
+        size=(VIDEO_W - 120, None), method="caption",
+        text_align="center", font=FONT_BOLD,
+    ).with_position(("center", VIDEO_H - 200)).with_duration(duration)
+    return safe_with_effects(clip, [vfx.FadeIn(0.4), vfx.FadeOut(0.4)])
 
 
 def make_top_bar(duration: float):
-    return (
+    clip = (
         ColorClip(size=(VIDEO_W, 80), color=(0, 0, 0))
-        .with_opacity(0.45).with_position((0, 0))
-        .with_duration(duration).with_effects([vfx.FadeIn(0.5)])
+        .with_opacity(0.45).with_position((0, 0)).with_duration(duration)
     )
+    return safe_with_effects(clip, [vfx.FadeIn(0.5)])
 
 
 def get_base_clip(video_path: Path, clip_duration: float):
@@ -377,35 +366,40 @@ def get_base_clip(video_path: Path, clip_duration: float):
     if raw.duration >= clip_duration:
         clipped = raw.subclipped(0, clip_duration)
     else:
-        loops   = int(clip_duration / raw.duration) + 2
+        loops = int(clip_duration / raw.duration) + 2
         clipped = concatenate_videoclips([raw] * loops).subclipped(0, clip_duration)
-    return clipped.resized(VIDEO_SIZE).with_effects([vfx.FadeIn(0.4), vfx.FadeOut(0.4)])
+    resized = clipped.resized(VIDEO_SIZE)
+    return safe_with_effects(resized, [vfx.FadeIn(0.4), vfx.FadeOut(0.4)])
+
+
+def make_fallback_clip(clip_duration: float):
+    clip = ColorClip(size=VIDEO_SIZE, color=(15, 15, 35), duration=clip_duration)
+    return safe_with_effects(clip, [vfx.FadeIn(0.4), vfx.FadeOut(0.4)])
 
 
 def assemble_video(scenes: list, output_path: str, language: str) -> None:
-    print(f"   Assembling {language} video...")
+    print(f"🎬 Assembling {language} video...")
     TEMP_DIR.mkdir(exist_ok=True)
     clips = []
 
     for i, scene in enumerate(scenes):
-        print(f"    Scene {i+1}/{len(scenes)}: '{scene['search_query']}'")
+        print(f"   Scene {i+1}/{len(scenes)}: '{scene['search_query']}'")
         audio_path = TEMP_DIR / f"audio_{i}.mp3"
         video_path = TEMP_DIR / f"video_{i}.mp4"
 
         generate_voiceover(scene["narration"], audio_path, language)
-        audio_clip    = AudioFileClip(str(audio_path))
+        audio_clip = AudioFileClip(str(audio_path))
         clip_duration = audio_clip.duration + 0.6
 
         got = download_stock_video(scene["search_query"], scene["duration"], video_path)
         if got:
             try:
                 base = get_base_clip(video_path, clip_duration)
-            except Exception:
-                base = (ColorClip(size=VIDEO_SIZE, color=(15, 15, 35), duration=clip_duration)
-                        .with_effects([vfx.FadeIn(0.4), vfx.FadeOut(0.4)]))
+            except Exception as e:
+                print(f"   ⚠️  Video load failed ({e}), using colour fallback")
+                base = make_fallback_clip(clip_duration)
         else:
-            base = (ColorClip(size=VIDEO_SIZE, color=(15, 15, 35), duration=clip_duration)
-                    .with_effects([vfx.FadeIn(0.4), vfx.FadeOut(0.4)]))
+            base = make_fallback_clip(clip_duration)
 
         clips.append(
             CompositeVideoClip([
@@ -420,7 +414,7 @@ def assemble_video(scenes: list, output_path: str, language: str) -> None:
         temp_audiofile="temp_audio_merge.aac", remove_temp=True, logger=None,
     )
     shutil.rmtree(TEMP_DIR, ignore_errors=True)
-    print(f"   Assembled: {output_path}")
+    print(f"✅ Assembled: {output_path}")
 
 
 # ════════════════════════════════════════════════════════
@@ -428,7 +422,7 @@ def assemble_video(scenes: list, output_path: str, language: str) -> None:
 # ════════════════════════════════════════════════════════
 
 def upload_to_youtube(video_path: str, title: str, description: str, tags: list) -> str:
-    print("   Uploading to YouTube...")
+    print("📤 Uploading to YouTube...")
     token_json_str = os.environ.get("YOUTUBE_TOKEN_JSON")
     if token_json_str:
         tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".json", mode="w")
@@ -459,8 +453,9 @@ def upload_to_youtube(video_path: str, title: str, description: str, tags: list)
     response = None
     while response is None:
         _, response = req.next_chunk()
+
     video_id = response["id"]
-    print(f"   Published: https://youtube.com/watch?v={video_id}")
+    print(f"✅ Published: https://youtube.com/watch?v={video_id}")
     return video_id
 
 
@@ -471,24 +466,26 @@ def upload_to_youtube(video_path: str, title: str, description: str, tags: list)
 def run_pipeline(language: str, output_path: str):
     import time
     print(f"\n{'─'*55}")
-    print(f"  Starting {language} video...")
+    print(f"🚀 Starting {language} video...")
     print(f"{'─'*55}\n")
     try:
-        script   = generate_script(language)
+        script = generate_script(language)
         assemble_video(script["scenes"], output_path, language)
         video_id = upload_to_youtube(
             output_path, script["title"], script["description"], script["tags"]
         )
-        time.sleep(1)   # Small delay so MoviePy fully releases the file
+        time.sleep(1)
         if os.path.exists(output_path):
             try:
                 os.remove(output_path)
             except Exception:
-                pass    # Non-critical — file cleanup can fail silently
-        print(f"  {language} done: https://youtube.com/watch?v={video_id}\n")
+                pass
+        print(f"✅ {language} done: https://youtube.com/watch?v={video_id}\n")
         return video_id
     except Exception as e:
-        print(f"  {language} failed: {e}")
+        print(f"❌ {language} failed: {e}")
+        import traceback
+        traceback.print_exc()
         time.sleep(1)
         if os.path.exists(output_path):
             try:
@@ -501,8 +498,8 @@ def run_pipeline(language: str, output_path: str):
 def run_daily_pipeline():
     start = datetime.now()
     print(f"\n{'='*55}")
-    print(f"  DAILY VIDEO BOT — {start.strftime('%Y-%m-%d %H:%M UTC')}")
-    print(f"  English + Tamil | Neural Voice | Cost: Rs.0")
+    print(f"🎯 DAILY VIDEO BOT — {start.strftime('%Y-%m-%d %H:%M UTC')}")
+    print(f"   English + Tamil | Neural Voice | Cost: Rs.0")
     print(f"{'='*55}")
 
     eng_id = run_pipeline("English", "final_video_english.mp4")
@@ -510,9 +507,9 @@ def run_daily_pipeline():
 
     elapsed = (datetime.now() - start).seconds // 60
     print(f"\n{'='*55}")
-    print(f"  Done in ~{elapsed} min")
-    if eng_id: print(f"  English: https://youtube.com/watch?v={eng_id}")
-    if tam_id: print(f"  Tamil:   https://youtube.com/watch?v={tam_id}")
+    print(f"⏱️  Done in ~{elapsed} min")
+    if eng_id: print(f"🇬🇧 English: https://youtube.com/watch?v={eng_id}")
+    if tam_id: print(f"🇮🇳 Tamil:   https://youtube.com/watch?v={tam_id}")
     print(f"{'='*55}\n")
 
     if not eng_id and not tam_id:
