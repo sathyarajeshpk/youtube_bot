@@ -12,3 +12,6 @@ __pycache__/
 *.pyc
 .env
 bot.log
+
+# ── Fonts are downloaded at runtime (see main.py ensure_fonts) ──
+fonts/*.ttf

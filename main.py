@@ -89,7 +89,7 @@ _NON_CHAT_HINTS = ("whisper", "tts", "guard", "embed", "moderation", "vision")
 
 # ════════════════════════════════════════════════════════
 # FONTS — full path required for MoviePy 2.x
-# Bundled in ./fonts (SIL Open Font License):
+# Auto-downloaded into ./fonts (SIL Open Font License):
 #   Anton            — bold display font, the classic viral-Shorts caption look
 #   Mukta Malar Bold — covers BOTH Tamil and Latin. DejaVu/Noto-Tamil alone
 #                      render the English words inside Tamil speech
@@ -97,6 +97,33 @@ _NON_CHAT_HINTS = ("whisper", "tts", "guard", "embed", "moderation", "vision")
 # ════════════════════════════════════════════════════════
 
 REPO_DIR = Path(__file__).resolve().parent
+
+# Downloaded on first run (SIL Open Font License — see fonts/OFL-*.txt)
+FONT_URLS = {
+    "Anton-Regular.ttf":
+        "https://raw.githubusercontent.com/google/fonts/main/ofl/anton/Anton-Regular.ttf",
+    "MuktaMalar-Bold.ttf":
+        "https://raw.githubusercontent.com/google/fonts/main/ofl/muktamalar/MuktaMalar-Bold.ttf",
+}
+
+
+def ensure_fonts():
+    fonts_dir = REPO_DIR / "fonts"
+    fonts_dir.mkdir(exist_ok=True)
+    for name, url in FONT_URLS.items():
+        path = fonts_dir / name
+        if path.exists() and path.stat().st_size > 10_000:
+            continue
+        try:
+            r = requests.get(url, timeout=30)
+            r.raise_for_status()
+            path.write_bytes(r.content)
+            print(f"⬇️  Downloaded font: {name}")
+        except Exception as e:
+            print(f"⚠️  Could not download {name} ({e}) — will use system fonts")
+
+
+ensure_fonts()
 
 
 def _first_existing(paths):
