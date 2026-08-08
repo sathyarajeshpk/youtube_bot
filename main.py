@@ -970,8 +970,10 @@ def assemble_video(script: dict, output_path: str, language: str) -> None:
 # STEP 5: YOUTUBE UPLOAD
 # ════════════════════════════════════════════════════════
 
-def upload_to_youtube(video_path: str, title: str, description: str, tags: list) -> str:
+def upload_to_youtube(video_path: str, title: str, description: str, tags: list,
+                      language: str = "English") -> str:
     print("📤 Uploading to YouTube...")
+    lang_code = "ta" if language == "Tamil" else "en"
     token_json_str = os.environ.get("YOUTUBE_TOKEN_JSON")
     if token_json_str:
         tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".json", mode="w")
@@ -994,7 +996,12 @@ def upload_to_youtube(video_path: str, title: str, description: str, tags: list)
         body={
             "snippet": {
                 "title": title, "description": description,
-                "tags": tags, "categoryId": "23", "defaultLanguage": "en",
+                "tags": tags, "categoryId": "23",
+                # Tell YouTube what is actually being spoken, so the Tamil
+                # video is recommended to Tamil speakers rather than filed
+                # as English.
+                "defaultLanguage": lang_code,
+                "defaultAudioLanguage": lang_code,
             },
             "status": {"privacyStatus": "public", "selfDeclaredMadeForKids": False},
         },
@@ -1026,7 +1033,8 @@ def run_pipeline(language: str, output_path: str):
             return "dry-run"
 
         video_id = upload_to_youtube(
-            output_path, script["title"], script["description"], script["tags"]
+            output_path, script["title"], script["description"], script["tags"],
+            language,
         )
         try:
             os.remove(output_path)
