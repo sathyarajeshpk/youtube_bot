@@ -594,23 +594,60 @@ def narrate(text: str, language: str, tmp_prefix: str):
 # ════════════════════════════════════════════════════════
 
 _used_video_ids = set()
+_footage_stats = {"real": 0, "fallback": 0}
+_pexels_key_bad = False
+
+# Always-populated queries, used only when everything specific has missed,
+# so a scene falls back to real footage rather than a plain colour card.
+BACKUP_QUERIES = [
+    "india street life", "city crowd walking", "nature landscape",
+    "abstract background motion", "people talking",
+]
 
 
-def _pexels_search(query: str, min_duration: int):
-    headers = {"Authorization": os.environ["PEXELS_API_KEY"]}
-    orientation = "portrait" if VIDEO_H > VIDEO_W else "landscape"
-    url = (
-        f"https://api.pexels.com/videos/search"
-        f"?query={requests.utils.quote(query)}"
-        f"&per_page=12"
-        f"&orientation={orientation}"
-        f"&size=medium"
+class PexelsAuthError(RuntimeError):
+    pass
+
+
+class PexelsRateLimited(RuntimeError):
+    pass
+
+
+def _pexels_search(query: str, orientation: str | None) -> list:
+    """One search against Pexels. `orientation=None` means any shape."""
+    global _pexels_key_bad
+    if _pexels_key_bad:
+        return []
+    params = {"query": query, "per_page": 15}
+    if orientation:
+        params["orientation"] = orientation
+    r = requests.get(
+        "https://api.pexels.com/videos/search",
+        headers={"Authorization": os.environ["PEXELS_API_KEY"]},
+        params=params, timeout=20,
     )
-    data = requests.get(url, headers=headers, timeout=20).json()
-    videos = [v for v in data.get("videos", [])
-              if v.get("duration", 0) >= max(2, min_duration - 3)
-              and v["id"] not in _used_video_ids]
-    return videos or [v for v in data.get("videos", []) if v["id"] not in _used_video_ids]
+    if r.status_code in (401, 403):
+        _pexels_key_bad = True
+        raise PexelsAuthError(
+            f"Pexels rejected the API key (HTTP {r.status_code}). "
+            "Every scene will fall back to a plain colour card until the "
+            "PEXELS_API_KEY secret is fixed — get a free key at "
+            "https://www.pexels.com/api/"
+        )
+    if r.status_code == 429:
+        raise PexelsRateLimited(
+            "Pexels rate limit hit (200 requests/hour on the free tier)"
+        )
+    r.raise_for_status()
+    return r.json().get("videos", [])
+
+
+def _pick_video(videos: list, min_duration: int):
+    """Prefer clips long enough to cover the scene, and never reuse one."""
+    fresh = [v for v in videos if v.get("id") not in _used_video_ids]
+    long_enough = [v for v in fresh if v.get("duration", 0) >= max(2, min_duration - 3)]
+    pool = long_enough or fresh
+    return random.choice(pool[:8]) if pool else None
 
 
 def _best_file(video):
@@ -626,13 +663,28 @@ def _best_file(video):
 
 
 def download_stock_video(query: str, min_duration: int, output_path: Path) -> bool:
-    fallback_queries = [query, f"{query.split()[0]} india", "india street life"]
-    for q in fallback_queries:
+    """Try progressively looser searches so a scene almost always gets real
+    footage. Portrait clips are scarce on Pexels, so after trying portrait we
+    accept any orientation — fit_cover() centre-crops it to frame anyway."""
+    want = "portrait" if VIDEO_H > VIDEO_W else "landscape"
+    simple = " ".join(query.split()[:2])
+    attempts = [
+        (query, want),      # ideal: matching subject, matching shape
+        (query, None),      # same subject, any shape (crops fine)
+        (simple, None),     # looser subject
+        (random.choice(BACKUP_QUERIES), None),  # anything real beats a colour card
+    ]
+
+    seen = set()
+    for q, orientation in attempts:
+        key = (q, orientation)
+        if not q or key in seen:
+            continue
+        seen.add(key)
         try:
-            videos = _pexels_search(q, min_duration)
-            if not videos:
+            video = _pick_video(_pexels_search(q, orientation), min_duration)
+            if not video:
                 continue
-            video = random.choice(videos[:6])
             chosen = _best_file(video)
             if not chosen:
                 continue
@@ -642,12 +694,22 @@ def download_stock_video(query: str, min_duration: int, output_path: Path) -> bo
                 for chunk in r.iter_content(chunk_size=65536):
                     f.write(chunk)
             _used_video_ids.add(video["id"])
-            if q != query:
-                print(f"   ↪️  Used fallback query '{q}'")
+            if q != query or orientation != want:
+                print(f"   ↪️  Footage via '{q}' ({orientation or 'any orientation'})")
+            _footage_stats["real"] += 1
             return True
+        except PexelsAuthError as e:
+            print(f"   ❌ {e}")
+            break
+        except PexelsRateLimited as e:
+            # Looser queries would hit the same limit — don't burn calls on them.
+            print(f"   ⚠️  {e}")
+            break
         except Exception as e:
             print(f"   ⚠️  Pexels error for '{q}': {e}")
-    print(f"   ⚠️  No footage for '{query}' — gradient fallback")
+
+    print(f"   ⚠️  No footage for '{query}' — using gradient card")
+    _footage_stats["fallback"] += 1
     return False
 
 
@@ -844,6 +906,7 @@ def make_outro_card(language: str, font: str):
 def assemble_video(script: dict, output_path: str, language: str) -> None:
     scenes = script["scenes"]
     font = FONT_TAMIL if language == "Tamil" else FONT_ENGLISH
+    _footage_stats["real"] = _footage_stats["fallback"] = 0
     print(f"🎬 Assembling {language} video ({VIDEO_W}x{VIDEO_H})...")
     TEMP_DIR.mkdir(exist_ok=True)
     clips = []
@@ -895,7 +958,12 @@ def assemble_video(script: dict, output_path: str, language: str) -> None:
         temp_audiofile="temp_audio_merge.aac", remove_temp=True, logger=None,
     )
     shutil.rmtree(TEMP_DIR, ignore_errors=True)
-    print(f"✅ Assembled: {output_path} ({final.duration:.1f}s)")
+    real, fallback = _footage_stats["real"], _footage_stats["fallback"]
+    print(f"✅ Assembled: {output_path} ({final.duration:.1f}s) — "
+          f"{real} scenes with stock footage, {fallback} on gradient cards")
+    if fallback and fallback >= real:
+        print("   ⚠️  Most scenes had no footage. Check PEXELS_API_KEY and the "
+              "log above for Pexels errors.")
 
 
 # ════════════════════════════════════════════════════════
