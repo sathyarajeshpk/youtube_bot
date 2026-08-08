@@ -12,9 +12,22 @@ in vertical **Shorts** format for maximum reach.
 | Script writing | Groq (auto-picks the best available model) | Free |
 | Voiceover | Microsoft Edge neural TTS (`en-IN-Prabhat`, `ta-IN-Valluvar`) | Free |
 | Stock footage | Pexels API | Free |
-| Editing | MoviePy + FFmpeg (captions, zoom, crossfades) | Free |
+| Editing | MoviePy + FFmpeg (karaoke captions, zoom, crossfades) | Free |
 | Upload | YouTube Data API v3 | Free |
 | Scheduling | GitHub Actions (daily 06:00 UTC / 11:30 IST) | Free |
+
+### What the videos look like
+
+- **Karaoke captions** — Edge TTS reports the exact start time of every
+  spoken word, so each word lights up gold precisely as it is said.
+- **A beat before the punchline** — each sentence is narrated separately
+  with a short silence between, the way a comedian delivers a setup.
+- Captions sit clear of YouTube's Shorts overlay, on a rounded translucent
+  pill so they stay readable over bright footage.
+- Alternating slow push-in / pull-out on the footage, crossfades between
+  scenes, a gold hook title over the first scene, and a spoken outro card.
+- Topics rotate by date, so nothing repeats for 24 days and the English and
+  Tamil videos of the same day always cover different stories.
 
 ## Setup
 

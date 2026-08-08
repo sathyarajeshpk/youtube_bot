@@ -1,7 +1,7 @@
 """
 Daily AI YouTube Video Bot
 Posts 2 videos per day: English + Tamil
-Neural voice (Microsoft Edge TTS) + phrase-timed captions
+Neural voice (Microsoft Edge TTS) + word-synced karaoke captions
 Funny Indian comedy style — vertical Shorts format
 100% Free — No billing account needed
 
@@ -27,7 +27,7 @@ import subprocess
 import requests
 import numpy as np
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timezone
 
 warnings.filterwarnings("ignore")
 
@@ -35,11 +35,14 @@ import groq as groq_errors
 from groq import Groq
 import edge_tts  # Microsoft neural TTS — sounds like a real human
 
+from PIL import Image, ImageDraw, ImageFont
+
 from moviepy import (
-    VideoFileClip, AudioFileClip, ColorClip, ImageClip,
-    TextClip, CompositeVideoClip, concatenate_videoclips,
+    VideoFileClip, AudioFileClip, ImageClip,
+    TextClip, CompositeVideoClip, CompositeAudioClip, concatenate_videoclips,
 )
 import moviepy.video.fx as vfx
+import moviepy.audio.fx as afx
 
 from google.oauth2.credentials import Credentials
 from google.auth.transport.requests import Request
@@ -67,6 +70,18 @@ VOICE_ENGLISH = "en-IN-PrabhatNeural"   # Indian English male — warm and clear
 VOICE_TAMIL   = "ta-IN-ValluvarNeural"  # Tamil male — natural Tamil accent
 RATE_ENGLISH  = "+10%"                  # energetic, stand-up pacing
 RATE_TAMIL    = "+6%"                   # a touch faster but still clear
+
+# Silence inserted between sentences. A punchline needs a beat before it —
+# this is the difference between a comedian and a text-to-speech robot.
+PUNCHLINE_BEAT = 0.38
+
+# Karaoke captions: the spoken word lights up gold, exactly on the word.
+CAPTION_IDLE   = (255, 255, 255, 255)
+CAPTION_ACTIVE = (255, 214, 10, 255)
+CAPTION_PILL   = (0, 0, 0, 135)
+# Vertical centre of the caption block, as a fraction of frame height.
+# Portrait sits above YouTube's Shorts overlay (title/handle/buttons).
+CAPTION_CENTER = 0.58 if VIDEO_H > VIDEO_W else 0.78
 
 OUTRO_LINES = {
     "English": "If you laughed even once, hit subscribe. It's free — unlike your neighbour's WiFi.",
@@ -181,6 +196,14 @@ _EMOJI_RE = re.compile(
 
 def strip_emoji(text: str) -> str:
     return _EMOJI_RE.sub("", text).strip()
+
+
+def safe_with_effects(clip, effects: list):
+    """Apply effects safely — falls back gracefully if moviepy version differs."""
+    try:
+        return clip.with_effects(effects)
+    except Exception:
+        return clip
 
 
 # ════════════════════════════════════════════════════════
@@ -433,10 +456,20 @@ def translate_to_tamil(text: str, client: Groq) -> str:
     return result.strip()
 
 
+def pick_topic(language: str) -> str:
+    """Rotate through the topic bank by date instead of picking at random,
+    so nothing repeats for 24 days. The two languages are offset half a
+    bank apart so the day's English and Tamil videos are never the same
+    story told twice."""
+    day = datetime.now(timezone.utc).toordinal()
+    offset = 0 if language == "English" else len(FUNNY_TOPICS) // 2
+    return FUNNY_TOPICS[(day + offset) % len(FUNNY_TOPICS)]
+
+
 def generate_script(language: str) -> dict:
     print(f"📝 Generating {language} script with Groq...")
     client = Groq(api_key=os.environ["GROQ_API_KEY"])
-    topic = random.choice(FUNNY_TOPICS)
+    topic = pick_topic(language)
     print(f"🎲 Topic: {topic}")
 
     script = generate_english_script(topic, client)
@@ -469,28 +502,91 @@ def generate_script(language: str) -> dict:
 
 # ════════════════════════════════════════════════════════
 # STEP 2: NEURAL VOICEOVER WITH EDGE TTS
+# Streaming mode also reports WordBoundary events, which give the exact
+# start time of every spoken word — that is what drives the karaoke
+# captions in step 4.
 # ════════════════════════════════════════════════════════
 
-async def _generate_voiceover_async(text: str, output_path: Path, voice: str, rate: str) -> None:
+async def _tts_stream_async(text: str, output_path: Path, voice: str, rate: str) -> list:
     communicate = edge_tts.Communicate(text=text, voice=voice, rate=rate)
-    await communicate.save(str(output_path))
+    words = []
+    with open(output_path, "wb") as f:
+        async for chunk in communicate.stream():
+            if chunk["type"] == "audio":
+                f.write(chunk.get("data", b""))
+            elif chunk["type"] == "WordBoundary":
+                # offsets are in 100-nanosecond ticks
+                words.append({
+                    "text": chunk["text"],
+                    "start": chunk["offset"] / 1e7,
+                    "end": (chunk["offset"] + chunk["duration"]) / 1e7,
+                })
+    return words
 
 
-def generate_voiceover(text: str, output_path: Path, language: str) -> None:
+def estimate_word_times(text: str, duration: float) -> list:
+    """Fallback when the service sends no WordBoundary events: spread the
+    words across the clip, weighted by length."""
+    words = text.split()
+    if not words:
+        return []
+    weights = [len(w) + 1 for w in words]
+    total = sum(weights)
+    out, t = [], 0.0
+    for w, weight in zip(words, weights):
+        d = duration * weight / total
+        out.append({"text": w, "start": t, "end": t + d})
+        t += d
+    return out
+
+
+def tts_segment(text: str, output_path: Path, language: str) -> list:
+    """Synthesize one sentence, with retries. Returns word timings."""
     voice = VOICE_TAMIL if language == "Tamil" else VOICE_ENGLISH
     rate = RATE_TAMIL if language == "Tamil" else RATE_ENGLISH
     last_err = None
     for attempt in range(3):
         try:
-            asyncio.run(_generate_voiceover_async(text, output_path, voice, rate))
+            words = asyncio.run(_tts_stream_async(text, output_path, voice, rate))
             if output_path.exists() and output_path.stat().st_size > 1000:
-                return
+                return words
             raise RuntimeError("TTS produced an empty file")
         except Exception as e:
             last_err = e
             print(f"   ⚠️  TTS attempt {attempt+1}/3 failed: {e}")
             time.sleep(3 * (attempt + 1))
     raise RuntimeError(f"Edge TTS failed: {last_err}")
+
+
+def split_sentences(text: str) -> list:
+    parts = re.split(r"(?<=[.!?…।])\s+", text.strip())
+    return [p.strip() for p in parts if p.strip()] or [text.strip()]
+
+
+def narrate(text: str, language: str, tmp_prefix: str):
+    """Speak the narration sentence by sentence, leaving a beat before the
+    punchline. Returns (audio_clip, word_timings) with timings already
+    offset onto the combined timeline."""
+    parts, timings, offset = [], [], 0.0
+    for i, sentence in enumerate(split_sentences(text)):
+        path = TEMP_DIR / f"{tmp_prefix}_s{i}.mp3"
+        words = tts_segment(sentence, path, language)
+        clip = AudioFileClip(str(path))
+        if not words:
+            words = estimate_word_times(sentence, clip.duration)
+        for w in words:
+            timings.append({
+                "text": w["text"],
+                "start": w["start"] + offset,
+                "end": min(w["end"], clip.duration) + offset,
+            })
+        parts.append(clip.with_start(offset))
+        offset += clip.duration + PUNCHLINE_BEAT
+
+    audio = CompositeAudioClip(parts)
+    # Even out loudness across scenes, then leave headroom so AAC never clips.
+    audio = safe_with_effects(audio, [afx.AudioNormalize(), afx.MultiplyVolume(0.92)])
+    return audio, timings
 
 
 # ════════════════════════════════════════════════════════
@@ -559,14 +655,6 @@ def download_stock_video(query: str, min_duration: int, output_path: Path) -> bo
 # STEP 4: VIDEO ASSEMBLY
 # ════════════════════════════════════════════════════════
 
-def safe_with_effects(clip, effects: list):
-    """Apply effects safely — falls back gracefully if moviepy version differs."""
-    try:
-        return clip.with_effects(effects)
-    except Exception:
-        return clip
-
-
 def fit_cover(clip):
     """Scale to fill the frame and center-crop — never stretch/distort."""
     scale = max(VIDEO_W / clip.w, VIDEO_H / clip.h)
@@ -577,10 +665,17 @@ def fit_cover(clip):
     )
 
 
-def ken_burns(clip, duration: float):
-    """Slow zoom-in — makes static stock footage feel alive."""
+def ken_burns(clip, duration: float, zoom_in: bool = True):
+    """Slow push in or pull out — makes static stock footage feel alive.
+    Alternating the direction per scene keeps a six-scene video from
+    feeling like the same move six times."""
     try:
-        zoomed = clip.resized(lambda t: 1.0 + 0.06 * (t / max(duration, 0.1)))
+        span = max(duration, 0.1)
+        if zoom_in:
+            factor = lambda t: 1.005 + 0.07 * (t / span)
+        else:
+            factor = lambda t: 1.075 - 0.07 * (t / span)
+        zoomed = clip.resized(factor)
         return CompositeVideoClip(
             [zoomed.with_position("center")], size=VIDEO_SIZE
         ).with_duration(duration)
@@ -588,46 +683,89 @@ def ken_burns(clip, duration: float):
         return clip
 
 
-def chunk_narration(text: str, max_chars: int = 34) -> list:
-    """Split narration into short phrase chunks for timed captions."""
-    words = strip_emoji(text).split()
-    chunks, current = [], ""
+# ── Karaoke captions ────────────────────────────────────
+# Rendered with PIL rather than moviepy's TextClip so we control the exact
+# layout: one line at a time, the word currently being spoken lit up gold,
+# on a rounded translucent pill. PIL is built with raqm here, so Tamil
+# glyph shaping and reordering come out right.
+
+def wrap_words(words: list, pil_font, max_width: float) -> list:
+    """Pack word timings into lines using real measured pixel widths."""
+    space = pil_font.getlength(" ")
+    lines, current, width = [], [], 0.0
     for w in words:
-        candidate = f"{current} {w}".strip()
-        if len(candidate) > max_chars and current:
-            chunks.append(current)
-            current = w
+        ww = pil_font.getlength(w["text"])
+        advance = ww if not current else ww + space
+        if current and width + advance > max_width:
+            lines.append(current)
+            current, width = [w], ww
         else:
-            current = candidate
+            current.append(w)
+            width += advance
     if current:
-        chunks.append(current)
-    return chunks or [strip_emoji(text)]
+        lines.append(current)
+    return lines
 
 
-def make_phrase_captions(text: str, duration: float, font: str) -> list:
-    """Phrase-by-phrase captions timed across the scene — much easier to read
-    than one giant block of text, and it keeps eyes glued to the screen."""
-    chunks = chunk_narration(text)
-    total_chars = sum(len(c) for c in chunks) or 1
-    usable = max(duration - 0.2, 0.5)
-    font_size = int(SHORT_EDGE * 0.058)
-    y_pos = int(VIDEO_H * (0.68 if VIDEO_H > VIDEO_W else 0.74))
+def render_caption_line(texts: list, active_idx: int, pil_font, stroke: int):
+    """One caption line as an RGBA frame, with `active_idx` highlighted."""
+    space = pil_font.getlength(" ")
+    widths = [pil_font.getlength(t) for t in texts]
+    total = sum(widths) + space * (len(widths) - 1)
+    ascent, descent = pil_font.getmetrics()
+    line_h = ascent + descent
+    pad_y = int(line_h * 0.34) + stroke
+    pad_x = int(line_h * 0.42) + stroke
 
-    caption_clips, t = [], 0.0
-    for i, chunk in enumerate(chunks):
-        d = usable * len(chunk) / total_chars
-        if i == len(chunks) - 1:
-            d = max(duration - t, d)  # last phrase holds until scene end
-        clip = TextClip(
-            text=chunk, font_size=font_size, color="white",
-            stroke_color="black", stroke_width=max(2, font_size // 14),
-            size=(VIDEO_W - 120, None), method="caption",
-            text_align="center", font=font,
-            margin=(0, int(font_size * 0.75)),  # moviepy clips descenders without headroom
-        ).with_position(("center", y_pos)).with_start(t).with_duration(d)
-        caption_clips.append(safe_with_effects(clip, [vfx.CrossFadeIn(0.12)]))
-        t += d
-    return caption_clips
+    img = Image.new("RGBA", (int(total) + pad_x * 2, line_h + pad_y * 2), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(img)
+    draw.rounded_rectangle(
+        [0, 0, img.width - 1, img.height - 1],
+        radius=int(img.height * 0.3), fill=CAPTION_PILL,
+    )
+    x = pad_x
+    for i, text in enumerate(texts):
+        draw.text(
+            (x, pad_y), text, font=pil_font,
+            fill=CAPTION_ACTIVE if i == active_idx else CAPTION_IDLE,
+            stroke_width=stroke, stroke_fill=(0, 0, 0, 255),
+        )
+        x += widths[i] + space
+    return np.array(img)
+
+
+def make_karaoke_captions(word_timings: list, duration: float, font_path: str) -> list:
+    """One clip per spoken word: the line stays put, the highlight moves."""
+    words = [w for w in word_timings if strip_emoji(w["text"])]
+    if not words:
+        return []
+
+    font_size = int(SHORT_EDGE * 0.062)
+    pil_font = ImageFont.truetype(font_path, font_size)
+    stroke = max(2, font_size // 16)
+    lines = wrap_words(words, pil_font, VIDEO_W - 150)
+
+    clips = []
+    for li, line in enumerate(lines):
+        texts = [w["text"] for w in line]
+        next_line_start = lines[li + 1][0]["start"] if li + 1 < len(lines) else duration
+        line_end = min(max(next_line_start, line[-1]["end"]), duration)
+
+        for wi, word in enumerate(line):
+            start = line[0]["start"] if wi == 0 else word["start"]
+            end = line[wi + 1]["start"] if wi + 1 < len(line) else line_end
+            start, end = max(start, 0.0), min(end, duration)
+            if end - start < 0.02:
+                continue
+            frame = render_caption_line(texts, wi, pil_font, stroke)
+            y = int(CAPTION_CENTER * VIDEO_H - frame.shape[0] / 2)
+            clips.append(
+                ImageClip(frame)
+                .with_start(start)
+                .with_duration(end - start)
+                .with_position(("center", y))
+            )
+    return clips
 
 
 def make_hook_overlay(title: str, duration: float, font: str):
@@ -646,7 +784,7 @@ def make_hook_overlay(title: str, duration: float, font: str):
     return safe_with_effects(clip, [vfx.CrossFadeIn(0.25), vfx.CrossFadeOut(0.4)])
 
 
-def gradient_background(duration: float):
+def gradient_background(duration: float, zoom_in: bool = True):
     """Animated-feeling dark gradient — far nicer than a flat colour card."""
     palettes = [
         ((18, 12, 48), (96, 24, 72)),   # midnight purple → wine
@@ -658,10 +796,10 @@ def gradient_background(duration: float):
     grad = np.linspace(top, bottom, VIDEO_H).astype(np.uint8)
     frame = np.tile(grad[:, None, :], (1, VIDEO_W, 1))
     clip = ImageClip(frame).with_duration(duration)
-    return ken_burns(clip, duration)
+    return ken_burns(clip, duration, zoom_in)
 
 
-def get_base_clip(video_path: Path, clip_duration: float):
+def get_base_clip(video_path: Path, clip_duration: float, zoom_in: bool = True):
     raw = VideoFileClip(str(video_path))
     if raw.duration >= clip_duration:
         max_start = raw.duration - clip_duration
@@ -670,25 +808,13 @@ def get_base_clip(video_path: Path, clip_duration: float):
     else:
         loops = int(clip_duration / raw.duration) + 2
         clipped = concatenate_videoclips([raw] * loops).subclipped(0, clip_duration)
-    return ken_burns(fit_cover(clipped), clip_duration)
-
-
-def make_caption_backdrop(duration: float):
-    """Soft dark band behind captions for readability on bright footage."""
-    band_h = int(VIDEO_H * 0.22)
-    y = int(VIDEO_H * (0.64 if VIDEO_H > VIDEO_W else 0.70))
-    return (
-        ColorClip(size=(VIDEO_W, band_h), color=(0, 0, 0))
-        .with_opacity(0.35).with_position((0, y)).with_duration(duration)
-    )
+    return ken_burns(fit_cover(clipped), clip_duration, zoom_in)
 
 
 def make_outro_card(language: str, font: str):
     """Short branded outro with a spoken subscribe gag."""
     line = OUTRO_LINES[language]
-    audio_path = TEMP_DIR / "outro_audio.mp3"
-    generate_voiceover(line, audio_path, language)
-    audio = AudioFileClip(str(audio_path))
+    audio, _ = narrate(line, language, "outro")
     duration = audio.duration + 0.7
 
     bg = gradient_background(duration)
@@ -724,25 +850,24 @@ def assemble_video(script: dict, output_path: str, language: str) -> None:
 
     for i, scene in enumerate(scenes):
         print(f"   Scene {i+1}/{len(scenes)}: '{scene['search_query']}'")
-        audio_path = TEMP_DIR / f"audio_{i}.mp3"
         video_path = TEMP_DIR / f"video_{i}.mp4"
 
-        generate_voiceover(scene["narration"], audio_path, language)
-        audio_clip = AudioFileClip(str(audio_path))
+        audio_clip, word_timings = narrate(scene["narration"], language, f"sc{i}")
         clip_duration = audio_clip.duration + 0.5
+        zoom_in = i % 2 == 0
 
         got = download_stock_video(scene["search_query"], scene["duration"], video_path)
         if got:
             try:
-                base = get_base_clip(video_path, clip_duration)
+                base = get_base_clip(video_path, clip_duration, zoom_in)
             except Exception as e:
                 print(f"   ⚠️  Video load failed ({e}), using gradient fallback")
-                base = gradient_background(clip_duration)
+                base = gradient_background(clip_duration, zoom_in)
         else:
-            base = gradient_background(clip_duration)
+            base = gradient_background(clip_duration, zoom_in)
 
-        layers = [base, make_caption_backdrop(clip_duration)]
-        layers += make_phrase_captions(scene["narration"], clip_duration, font)
+        layers = [base]
+        layers += make_karaoke_captions(word_timings, clip_duration, font)
         if i == 0:
             hook = make_hook_overlay(script["title"], clip_duration, font)
             if hook:
