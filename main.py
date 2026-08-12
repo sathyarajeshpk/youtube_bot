@@ -45,6 +45,7 @@ import moviepy.video.fx as vfx
 import moviepy.audio.fx as afx
 
 from google.oauth2.credentials import Credentials
+from google.auth.exceptions import RefreshError
 from google.auth.transport.requests import Request
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
@@ -970,10 +971,44 @@ def assemble_video(script: dict, output_path: str, language: str) -> None:
 # STEP 5: YOUTUBE UPLOAD
 # ════════════════════════════════════════════════════════
 
-def upload_to_youtube(video_path: str, title: str, description: str, tags: list,
-                      language: str = "English") -> str:
-    print("📤 Uploading to YouTube...")
-    lang_code = "ta" if language == "Tamil" else "en"
+TOKEN_HELP = """
+╔════════════════════════════════════════════════════════════════════╗
+║  YOUTUBE_TOKEN_JSON IS NO LONGER VALID — nothing can be uploaded   ║
+╚════════════════════════════════════════════════════════════════════╝
+
+Google rejected the stored refresh token ('invalid_grant'). The videos
+themselves rendered fine; only the upload step is blocked.
+
+The usual cause: the Google Cloud OAuth consent screen is still in
+"Testing" mode, where refresh tokens EXPIRE AFTER 7 DAYS. Re-issuing the
+token without fixing that means it dies again next week.
+
+Fix it once, properly:
+
+  1. https://console.cloud.google.com  →  APIs & Services
+     →  OAuth consent screen  →  PUBLISH APP  (moves it to "In production")
+     Ignore the verification warning; it does not apply to your own channel.
+
+  2. On your computer, in this repo:
+         python setup_youtube_auth.py
+     Sign in with the Google account that OWNS the YouTube channel.
+
+  3. Copy the ENTIRE contents of the new youtube_token.json into
+     GitHub  →  repo Settings  →  Secrets and variables  →  Actions
+     →  YOUTUBE_TOKEN_JSON  →  Update secret
+
+Other causes worth checking if it fails again: the Google account
+password was changed, access was revoked at myaccount.google.com/permissions,
+or the OAuth client was deleted in Google Cloud.
+"""
+
+
+class YouTubeAuthError(RuntimeError):
+    pass
+
+
+def get_youtube_credentials():
+    """Load and refresh the stored OAuth token, or raise with instructions."""
     token_json_str = os.environ.get("YOUTUBE_TOKEN_JSON")
     if token_json_str:
         tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".json", mode="w")
@@ -983,12 +1018,42 @@ def upload_to_youtube(video_path: str, title: str, description: str, tags: list,
     else:
         token_path = "youtube_token.json"
 
-    creds = Credentials.from_authorized_user_file(
-        token_path, scopes=["https://www.googleapis.com/auth/youtube.upload"]
-    )
+    try:
+        creds = Credentials.from_authorized_user_file(
+            token_path, scopes=["https://www.googleapis.com/auth/youtube.upload"]
+        )
+    except Exception as e:
+        raise YouTubeAuthError(f"Could not read YOUTUBE_TOKEN_JSON: {e}") from e
+
+    if not creds.refresh_token:
+        raise YouTubeAuthError("YOUTUBE_TOKEN_JSON has no refresh_token in it.")
+
     # The stored access token is hours-to-months old — always mint a fresh one.
-    if creds.refresh_token:
+    try:
         creds.refresh(Request())
+    except RefreshError as e:
+        raise YouTubeAuthError(f"Google rejected the refresh token: {e}") from e
+    return creds
+
+
+def preflight_youtube() -> bool:
+    """Check the upload credential BEFORE rendering. A dead token used to be
+    discovered only after ~35 minutes of rendering both videos."""
+    try:
+        get_youtube_credentials()
+        print("✅ YouTube credentials OK")
+        return True
+    except YouTubeAuthError as e:
+        print(f"❌ {e}")
+        print(TOKEN_HELP)
+        return False
+
+
+def upload_to_youtube(video_path: str, title: str, description: str, tags: list,
+                      language: str = "English") -> str:
+    print("📤 Uploading to YouTube...")
+    lang_code = "ta" if language == "Tamil" else "en"
+    creds = get_youtube_credentials()
 
     youtube = build("youtube", "v3", credentials=creds)
     req = youtube.videos().insert(
@@ -1058,6 +1123,15 @@ def run_daily_pipeline():
     if DRY_RUN:
         print("   MODE: DRY RUN (no upload)")
     print(f"{'='*55}")
+
+    # Check the upload credential first. Rendering both videos takes ~35
+    # minutes; there is no point spending that only to be rejected at the
+    # last step by a token we could have tested in one second.
+    if not DRY_RUN and not preflight_youtube():
+        raise RuntimeError(
+            "YouTube credentials are invalid — see the instructions above. "
+            "Nothing was rendered; fix YOUTUBE_TOKEN_JSON and re-run."
+        )
 
     eng_id = run_pipeline("English", "final_video_english.mp4")
     tam_id = run_pipeline("Tamil",   "final_video_tamil.mp4")
